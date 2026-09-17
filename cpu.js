@@ -1,6 +1,18 @@
 class Intel8080 {
-    constructor() {
-        this.memory = new Uint8Array(65536);
+    // bus: objeto compartido con read(addr)/write(addr,val) y un array `memory`.
+    // Si no se pasa uno (ej. en los tests unitarios), la CPU crea su propio bus
+    // minimo para seguir funcionando de forma aislada.
+    constructor(bus) {
+        this.bus = bus || {
+            memory: new Uint8Array(65536),
+            read(a) { return this.memory[a & 0xFFFF]; },
+            write(a, v) { this.memory[a & 0xFFFF] = v & 0xFF; }
+        };
+        // El coprocesador FPU se conecta despues de crear la CPU (main.js hace cpu.fpu = fpu),
+        // porque ambos necesitan compartir el mismo bus ya construido.
+        this.fpu = null;
+        this.onOutput = null; // callback(port, val) usado por la UI para instrucciones OUT
+        this.onInput = null;  // callback(port) -> valor usado por la UI para instrucciones IN
         this.reset();
     }
 
@@ -24,8 +36,9 @@ class Intel8080 {
             cy: false
         };
         this.halted = false;
-        if (this.memory) {
-            this.memory.fill(0);
+        this.ports = new Uint8Array(256);
+        if (this.bus && this.bus.memory) {
+            this.bus.memory.fill(0);
         }
     }
 
@@ -97,11 +110,30 @@ class Intel8080 {
     }
 
     readMemory(addr) {
-        return this.memory[addr & 0xFFFF];
+        return this.bus.read(addr & 0xFFFF);
     }
 
     writeMemory(addr, val) {
-        this.memory[addr & 0xFFFF] = val & 0xFF;
+        this.bus.write(addr & 0xFFFF, val & 0xFF);
+    }
+
+    readPort(port) {
+        port &= 0xFF;
+        if (this.onInput) {
+            const v = this.onInput(port);
+            if (typeof v === 'number') {
+                this.ports[port] = v & 0xFF;
+                return this.ports[port];
+            }
+        }
+        return this.ports[port];
+    }
+
+    writePort(port, val) {
+        port &= 0xFF;
+        val &= 0xFF;
+        this.ports[port] = val;
+        if (this.onOutput) this.onOutput(port, val);
     }
 
     fetch() {
@@ -266,10 +298,20 @@ class Intel8080 {
             case 0x3F: this.flags.cy = !this.flags.cy; break; // CMC
 
             // Special
-            case 0xDB: this.fetch(); break; // IN (Ignored for now)
-            case 0xD3: this.fetch(); break; // OUT (Ignored for now)
+            case 0xDB: { const port = this.fetch(); this.registers.a = this.readPort(port); break; } // IN
+            case 0xD3: { const port = this.fetch(); this.writePort(port, this.registers.a); break; } // OUT
             case 0xFB: break; // EI
             case 0xF3: break; // DI
+
+            // Coprocesador FPU: 0xED es un opcode "de escape" (misma tecnica que usa el Z80
+            // para sus instrucciones extendidas). El byte siguiente selecciona la operacion
+            // flotante; la CPU delega la ejecucion al FPU conectado, pasandose a si misma
+            // para que el FPU pueda seguir leyendo bytes del flujo de codigo (direcciones).
+            case 0xED: {
+                const subop = this.fetch();
+                if (this.fpu) this.fpu.execute(subop, this);
+                break;
+            }
         }
     }
 
