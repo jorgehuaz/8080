@@ -16,6 +16,7 @@ En este manual, no asumimos que sepas nada sobre electrónica o lenguaje ensambl
 4. [Capítulo 3: Segundo Grupo - Estructuras de Control y Lógica de Bits](#capítulo-3-segundo-grupo---estructuras-de-control-y-lógica-de-bits)
 5. [Capítulo 4: Tercer Grupo - Operando la Pila (Stack) y Funciones](#capítulo-4-tercer-grupo---operando-la-pila-stack-y-funciones)
 6. [Capítulo 5: Desafío Avanzado - Operaciones de 16 Bits en un CPU de 8 Bits](#capítulo-5-desafío-avanzado---operaciones-de-16-bits-en-un-cpu-de-8-bits)
+7. [Capítulo 6: El Coprocesador Matemático de Punto Flotante (FPU)](#capítulo-6-el-coprocesador-matemático-de-punto-flotante-fpu)
 
 ---
 
@@ -466,6 +467,117 @@ SHLD 2000H         ; Guarda el resultado en las posiciones 2000H y 2001H
 HLT
 ```
 
-¡Felicidades! Has completado el recorrido completo por el funcionamiento interno del microprocesador. Ahora tienes la capacidad intelectual y práctica de diseñar programas de gran rendimiento, depurar flujos paso a paso y, lo más importante, comprender exactamente cómo interactúa el software de alto nivel con el hardware subyacente.
+---
+
+## Capítulo 6: El Coprocesador Matemático de Punto Flotante (FPU)
+
+### 6.1 El problema: el 8080 solo sabe sumar enteros
+
+Todo lo que vimos hasta ahora —`ADD`, `SUB`, `DAD`— trabaja exclusivamente con **números enteros** de 8 o 16 bits. El Intel 8080 real no tenía ninguna forma nativa de representar `3.14` o `-0.5`. Cuando en los años 70-80 se necesitaban cálculos con decimales (hojas de cálculo, simulaciones científicas), se usaban dos caminos:
+
+1. **Software**: rutinas escritas a mano que emulan la aritmética decimal usando solo enteros (lento, pero no requiere hardware extra).
+2. **Un coprocesador matemático dedicado**: un chip aparte, conectado al mismo bus que la CPU, especializado únicamente en aritmética de punto flotante. Ejemplos históricos: el **AMD 9511** (1978) y, más adelante, el famoso **Intel 8087** que acompañaba al 8086/8088.
+
+Este proyecto simula conceptualmente esa segunda opción: un **FPU8080** que vive junto a la CPU, conectado al mismo bus de memoria, con sus propios registros internos (`F0`-`F3`).
+
+### 6.2 IEEE 754: cómo se representa un número decimal en binario
+
+Un número de punto flotante de precisión simple (32 bits) se divide en tres campos, siguiendo el estándar **IEEE 754**:
+
+| Campo | Bits | Significado |
+| :--- | :--- | :--- |
+| **Signo (S)** | 1 bit (bit 31) | `0` = positivo, `1` = negativo |
+| **Exponente (E)** | 8 bits (bits 30-23) | Exponente de la potencia de 2, con un *sesgo* (*bias*) de 127 |
+| **Mantisa (M)** | 23 bits (bits 22-0) | La parte fraccionaria del número, asumiendo un "1." implícito al inicio |
+
+La fórmula para reconstruir el valor real es:
+
+```
+valor = (-1)^S  ×  1.M (en binario)  ×  2^(E - 127)
+```
+
+**Ejemplo paso a paso: representar 1.5**
+
+1. `1.5` en binario es `1.1`.
+2. Normalizado en notación científica binaria: `1.1 × 2^0`.
+3. Signo: positivo → `S = 0`.
+4. Exponente: `0 + 127 (sesgo) = 127 = 01111111` en binario.
+5. Mantisa: la parte después del punto (`1`), rellenada con ceros a 23 bits → `10000000000000000000000`.
+6. Bits completos: `0 01111111 10000000000000000000000`.
+
+El panel "Coprocesador FPU" de este simulador muestra exactamente esta descomposición (S, E y M) para cada registro flotante, en tiempo real, cada vez que corres una operación — así se puede verificar a mano cualquier resultado.
+
+### 6.3 Arquitectura: el Bus compartido
+
+Antes, la CPU tenía su propio array de memoria (`this.memory`). Ahora existe una clase `Bus` (`bus.js`) que es la **única** propietaria de la memoria RAM de 64KB. Tanto `Intel8080` como `FPU8080` reciben una referencia al **mismo** objeto `Bus` en su constructor:
+
+```js
+const bus = new Bus();
+const cpu = new Intel8080(bus);
+const fpu = new FPU8080(bus);
+cpu.fpu = fpu;
+```
+
+Esto es fiel a cómo funcionaba un coprocesador real: no tenía su propia RAM, competía por el mismo bus de direcciones/datos que la CPU para leer y escribir los operandos.
+
+### 6.4 Las instrucciones nuevas de la ISA
+
+Se agregó un **opcode de escape**: `0xED` (la misma técnica que usa el procesador Z80 para sus instrucciones extendidas). El byte que sigue a `0xED` indica qué operación flotante ejecutar:
+
+| Mnemónico | Bytes | Descripción |
+| :--- | :--- | :--- |
+| `FLD Fn, addr` | 4 | Carga 4 bytes desde `addr` (vía el Bus) al registro flotante `Fn`, interpretándolos como IEEE 754 |
+| `FST Fn, addr` | 4 | Guarda el registro flotante `Fn` (4 bytes IEEE 754) en `addr` (vía el Bus) |
+| `FADD Fd, Fs` | 2 | `Fd = Fd + Fs` |
+| `FSUB Fd, Fs` | 2 | `Fd = Fd - Fs` |
+| `FMUL Fd, Fs` | 2 | `Fd = Fd * Fs` |
+| `FDIV Fd, Fs` | 2 | `Fd = Fd / Fs` |
+
+También se agregó la directiva `DF` (Define Float), hermana de `DB` (Define Byte), para colocar constantes flotantes directamente en memoria en formato IEEE 754:
+
+```assembly
+ORG 3000H
+DF 2.5      ; escribe 4 bytes: la representación IEEE754 de 2.5
+DF 1.25
+```
+
+**Ejemplo completo: sumar 2.5 + 1.25 con el coprocesador**
+
+```assembly
+ORG 3000H
+DF 2.5             ; constante flotante en 3000H
+DF 1.25            ; constante flotante en 3004H
+ORG 0000H
+FLD F0, 3000H      ; F0 = 2.5  (leído del bus)
+FLD F1, 3004H      ; F1 = 1.25 (leído del bus)
+FADD F0, F1        ; F0 = F0 + F1 = 3.75
+FST F0, 3008H      ; guarda 3.75 (IEEE754) en 3008H, vía el bus
+HLT
+```
+
+Este mismo programa está disponible en el selector "Demostraciones" del simulador (`FPU: sumar 2.5 + 1.25`), junto con una demo de multiplicación/división.
+
+### 6.5 Entrada/Salida real: `IN` y `OUT`
+
+El 8080 real ya definía `IN puerto` (lee un byte desde un puerto externo hacia `A`) y `OUT puerto` (escribe `A` hacia un puerto externo). En este simulador, esos "puertos" están conectados a la interfaz web:
+
+- `OUT 01H` → el valor de `A` aparece en el panel "Entrada / Salida" como la última salida.
+- `IN 00H` → `A` toma el valor que el usuario escribió en el campo "Valor para IN (hex)" del mismo panel.
+
+```assembly
+MVI A, 05H
+MVI B, 03H
+ADD B          ; A = 8
+OUT 01H        ; el 8 aparece en el panel de E/S
+HLT
+```
+
+### 6.6 La Traza de Ejecución: leyendo la "historia" de un programa
+
+En vez de mirar 4 tablas sueltas (registros, flags, pila, memoria) y deducir por tu cuenta qué pasó, el panel **"Traza de Ejecución"** narra cada instrucción en lenguaje simple, en el orden real en que ocurrió: qué instrucción se ejecutó, y si involucró al FPU o al bus de E/S, el detalle interno de esa operación (qué bytes se leyeron, qué cálculo IEEE 754 se hizo, qué resultado se guardó). Es la forma más directa de verificar, instrucción por instrucción, que la teoría del Capítulo 6 se cumple en la práctica.
+
+---
+
+¡Felicidades! Has completado el recorrido completo por el funcionamiento interno del microprocesador — desde la aritmética entera más básica hasta un coprocesador matemático de punto flotante conectado por bus compartido. Ahora tienes la capacidad intelectual y práctica de diseñar programas de gran rendimiento, depurar flujos paso a paso y, lo más importante, comprender exactamente cómo interactúa el software de alto nivel con el hardware subyacente.
 
 **¡Es hora de experimentar en el simulador!**

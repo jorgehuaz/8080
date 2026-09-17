@@ -79,9 +79,19 @@ class Assembler8080 {
             'CM': { code: 0xFC, bytes: 3 },
             'CPI': { code: 0xFE, bytes: 2 },
             'RST': { bytes: 1 },
+            // Coprocesador FPU: todas usan el prefijo de escape 0xED (ver cpu.js/fpu.js).
+            // FLD/FST cargan/guardan un registro flotante desde/hacia una direccion de memoria
+            // (4 bytes = 0xED, subop, addrLo, addrHi). Las aritmeticas son de 2 bytes.
+            'FLD': { bytes: 4 },
+            'FST': { bytes: 4 },
+            'FADD': { bytes: 2 },
+            'FSUB': { bytes: 2 },
+            'FMUL': { bytes: 2 },
+            'FDIV': { bytes: 2 },
         };
         this.regs = { 'B': 0, 'C': 1, 'D': 2, 'E': 3, 'H': 4, 'L': 5, 'M': 6, 'A': 7 };
         this.rps = { 'B': 0, 'C': 0, 'D': 1, 'E': 1, 'H': 2, 'L': 2, 'SP': 3, 'PSW': 3, 'BC': 0, 'DE': 1, 'HL': 2 };
+        this.fregs = { 'F0': 0, 'F1': 1, 'F2': 2, 'F3': 3 };
     }
 
     assemble(source) {
@@ -116,6 +126,11 @@ class Assembler8080 {
                 currentPC += tokens.length - 1;
                 return { type: 'data', mnemonic, tokens, pc };
             }
+            if (mnemonic === 'DF') { // Define Float: cada valor ocupa 4 bytes (IEEE 754 simple)
+                const pc = currentPC;
+                currentPC += (tokens.length - 1) * 4;
+                return { type: 'data-float', mnemonic, tokens, pc };
+            }
 
             const info = this.opcodes[mnemonic];
             if (!info) throw new Error(`Unknown mnemonic: ${mnemonic}`);
@@ -135,11 +150,23 @@ class Assembler8080 {
                 for (let i = 1; i < line.tokens.length; i++) {
                     binary[pc++] = this.parseValue(line.tokens[i], labels);
                 }
+            } else if (line.type === 'data-float') {
+                for (let i = 1; i < line.tokens.length; i++) {
+                    const val = parseFloat(line.tokens[i]);
+                    if (isNaN(val)) throw new Error(`Valor flotante invalido: ${line.tokens[i]}`);
+                    const buf = new ArrayBuffer(4);
+                    const dv = new DataView(buf);
+                    dv.setFloat32(0, val, false);
+                    binary[pc++] = dv.getUint8(0);
+                    binary[pc++] = dv.getUint8(1);
+                    binary[pc++] = dv.getUint8(2);
+                    binary[pc++] = dv.getUint8(3);
+                }
             } else {
                 const code = this.generateOpcode(line, labels);
-                binary[pc++] = code.byte1;
-                if (line.info.bytes > 1) binary[pc++] = code.byte2;
-                if (line.info.bytes > 2) binary[pc++] = code.byte3;
+                for (let i = 0; i < code.bytes.length; i++) {
+                    binary[pc++] = code.bytes[i] & 0xFF;
+                }
             }
             if (pc > maxAddr) maxAddr = pc;
         });
@@ -208,6 +235,19 @@ class Assembler8080 {
                 throw new Error(`Invalid RST number: ${tokens[1]}. Must be 0-7.`);
             }
             byte1 = 0xC7 | (val << 3);
+        } else if (mnemonic === 'FLD' || mnemonic === 'FST') {
+            const n = this.fregs[r1];
+            if (n === undefined) throw new Error(`Invalid float register: ${r1} in ${mnemonic} instruction`);
+            const addr = this.parseValue(tokens[2], labels);
+            const subop = (mnemonic === 'FLD' ? 0x00 : 0x10) | n;
+            return { bytes: [0xED, subop, addr & 0xFF, (addr >> 8) & 0xFF] };
+        } else if (['FADD', 'FSUB', 'FMUL', 'FDIV'].includes(mnemonic)) {
+            const d = this.fregs[r1];
+            const s = this.fregs[r2];
+            if (d === undefined) throw new Error(`Invalid float register: ${r1} in ${mnemonic} instruction`);
+            if (s === undefined) throw new Error(`Invalid float register: ${r2} in ${mnemonic} instruction`);
+            const base = { 'FADD': 0x20, 'FSUB': 0x30, 'FMUL': 0x40, 'FDIV': 0x50 };
+            return { bytes: [0xED, base[mnemonic] | (d << 2) | s] };
         } else if (line.info.bytes === 3) { // JMP, CALL, etc.
             const val = this.parseValue(tokens[1], labels);
             byte2 = val & 0xFF;
@@ -216,7 +256,10 @@ class Assembler8080 {
             byte2 = this.parseValue(tokens[1], labels) & 0xFF;
         }
 
-        return { byte1, byte2, byte3 };
+        const bytes = [byte1];
+        if (line.info.bytes > 1) bytes.push(byte2);
+        if (line.info.bytes > 2) bytes.push(byte3);
+        return { bytes };
     }
 
     parseValue(val, labels = {}) {

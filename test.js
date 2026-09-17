@@ -1,6 +1,8 @@
 // test.js - Unit tests for Intel 8080 CPU and Assembler
 const Intel8080 = require('./cpu.js');
 const Assembler8080 = require('./assembler.js');
+const Bus = require('./bus.js');
+const FPU8080 = require('./fpu.js');
 const assert = require('assert');
 
 console.log('--- Running Intel 8080 Emulator & Assembler Tests ---');
@@ -150,6 +152,74 @@ runTest('Assembler Rejects Invalid Code & Registers', () => {
     assert.throws(() => {
         assembler.assemble('JMP UNDEFINED_LABEL');
     }, /Undefined label/i);
+});
+
+runTest('IN/OUT read and write through onInput/onOutput callbacks', () => {
+    const cpu = new Intel8080();
+    let outPort = null, outVal = null;
+    cpu.onOutput = (port, val) => { outPort = port; outVal = val; };
+    cpu.onInput = (port) => 0x42;
+
+    cpu.registers.a = 0x99;
+    cpu.writeMemory(0, 0xD3); cpu.writeMemory(1, 0x07); // OUT 07H
+    cpu.step();
+    assert.strictEqual(outPort, 0x07);
+    assert.strictEqual(outVal, 0x99);
+
+    cpu.writeMemory(2, 0xDB); cpu.writeMemory(3, 0x01); // IN 01H
+    cpu.step();
+    assert.strictEqual(cpu.registers.a, 0x42);
+});
+
+runTest('CPU and FPU share the same Bus (memory)', () => {
+    const bus = new Bus();
+    const cpu = new Intel8080(bus);
+    const fpu = new FPU8080(bus);
+    cpu.fpu = fpu;
+
+    cpu.writeMemory(0x5000, 0xAB); // CPU writes
+    assert.strictEqual(fpu.bus.read(0x5000), 0xAB, 'FPU must see the byte the CPU wrote via the shared bus');
+});
+
+runTest('FPU decompose() matches IEEE 754 single precision for 1.5', () => {
+    const fpu = new FPU8080(new Bus());
+    const d = fpu.decompose(1.5);
+    // 1.5 = 1.1(bin) x 2^0 -> sign 0, exponent 127 (bias 127, unbiased 0), mantissa 1000...0
+    assert.strictEqual(d.sign, 0);
+    assert.strictEqual(d.exponent, 127);
+    assert.strictEqual(d.exponentUnbiased, 0);
+    assert.strictEqual(d.mantissa, '10000000000000000000000');
+});
+
+runTest('FLD/FADD/FST round-trip through the assembler and CPU+FPU', () => {
+    const assembler = new Assembler8080();
+    const source = `
+        ORG 3000H
+        DF 2.5
+        DF 1.25
+        ORG 0000H
+        FLD F0, 3000H
+        FLD F1, 3004H
+        FADD F0, F1
+        FST F0, 3008H
+        HLT
+    `;
+    const result = assembler.assemble(source);
+
+    const bus = new Bus();
+    const cpu = new Intel8080(bus);
+    const fpu = new FPU8080(bus);
+    cpu.fpu = fpu;
+    bus.memory.set(result.binary);
+
+    while (!cpu.halted) cpu.step();
+
+    assert.strictEqual(fpu.regs[0], 3.75, 'F0 should hold 2.5 + 1.25 = 3.75 after FADD');
+
+    // Verify FST actually wrote the IEEE754 bytes back to memory via the bus
+    const dv = new DataView(new ArrayBuffer(4));
+    for (let i = 0; i < 4; i++) dv.setUint8(i, bus.read(0x3008 + i));
+    assert.strictEqual(dv.getFloat32(0, false), 3.75);
 });
 
 console.log('All tests completed successfully!');

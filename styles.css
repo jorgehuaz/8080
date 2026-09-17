@@ -266,3 +266,85 @@ button:disabled {
 .stack-val {
     font-weight: bold;
 }
+
+.fpu, .io, .trace {
+    grid-column: span 2;
+}
+
+.fpu-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 4px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: #f8fafc;
+    margin-bottom: 4px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 13px;
+}
+
+.fpu-name {
+    font-weight: bold;
+    color: var(--primary-color);
+    width: 2rem;
+}
+
+.fpu-val {
+    font-weight: bold;
+    width: 5rem;
+}
+
+.fpu-bits {
+    color: var(--secondary-color);
+    font-size: 12px;
+}
+
+.io-input-row, .io-output-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 4px 0;
+}
+
+.io-input-row input {
+    font-family: 'Courier New', Courier, monospace;
+    padding: 4px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+#io-output-display {
+    font-family: 'Courier New', Courier, monospace;
+    font-weight: bold;
+    background: #f8fafc;
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+}
+
+#trace-log {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 12px;
+    max-height: 220px;
+    overflow-y: auto;
+    background: #0f172a;
+    color: #e2e8f0;
+    border-radius: 6px;
+    padding: 0.5rem;
+}
+
+.trace-line {
+    padding: 1px 0;
+    white-space: pre-wrap;
+}
+
+.trace-line.trace-fpu {
+    color: #93c5fd;
+    padding-left: 1rem;
+}
+
+.trace-line.trace-io {
+    color: #86efac;
+    padding-left: 1rem;
+}

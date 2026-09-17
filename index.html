@@ -28,6 +28,18 @@ HLT"></textarea>
                 <button id="btn-assemble">Assemble & Load</button>
                 <button id="btn-clear-code" class="btn-clear">Clear Code</button>
             </div>
+            <div class="controls">
+                <label for="demo-select">Demostraciones:</label>
+                <select id="demo-select">
+                    <option value="">-- Cargar ejemplo --</option>
+                    <option value="io_out">E/S: sumar y enviar por OUT</option>
+                    <option value="io_in">E/S: leer un valor por IN</option>
+                    <option value="fpu_add">FPU 1/4: SUMA (2.5 + 1.25)</option>
+                    <option value="fpu_sub">FPU 2/4: RESTA (5.0 - 1.5)</option>
+                    <option value="fpu_mul">FPU 3/4: MULTIPLICACION (4.0 * 2.0)</option>
+                    <option value="fpu_div">FPU 4/4: DIVISION (4.0 / 2.0)</option>
+                </select>
+            </div>
             <div id="assembler-output"></div>
         </section>
 
@@ -92,12 +104,56 @@ HLT"></textarea>
                     </div>
                     <div id="memory-table"></div>
                 </div>
+
+                <div class="card fpu">
+                    <h3>Coprocesador FPU (IEEE 754 simple precision)</h3>
+                    <div class="fpu-row" id="fpu-row-0">
+                        <span class="fpu-name">F0</span>
+                        <span class="fpu-val" id="fpu-f0-val">0</span>
+                        <span class="fpu-bits" id="fpu-f0-bits">S:0 E:0(+0) M:0</span>
+                    </div>
+                    <div class="fpu-row" id="fpu-row-1">
+                        <span class="fpu-name">F1</span>
+                        <span class="fpu-val" id="fpu-f1-val">0</span>
+                        <span class="fpu-bits" id="fpu-f1-bits">S:0 E:0(+0) M:0</span>
+                    </div>
+                    <div class="fpu-row" id="fpu-row-2">
+                        <span class="fpu-name">F2</span>
+                        <span class="fpu-val" id="fpu-f2-val">0</span>
+                        <span class="fpu-bits" id="fpu-f2-bits">S:0 E:0(+0) M:0</span>
+                    </div>
+                    <div class="fpu-row" id="fpu-row-3">
+                        <span class="fpu-name">F3</span>
+                        <span class="fpu-val" id="fpu-f3-val">0</span>
+                        <span class="fpu-bits" id="fpu-f3-bits">S:0 E:0(+0) M:0</span>
+                    </div>
+                </div>
+
+                <div class="card io">
+                    <h3>Entrada / Salida (Bus de E/S)</h3>
+                    <div class="io-input-row">
+                        <label for="io-input-value">Valor para IN (hex):</label>
+                        <input type="text" id="io-input-value" value="00" size="4">
+                    </div>
+                    <div class="io-output-row">
+                        <span>Ultima salida (OUT):</span>
+                        <span id="io-output-display">&mdash;</span>
+                    </div>
+                </div>
+
+                <div class="card trace">
+                    <h3>Traza de Ejecucion</h3>
+                    <div id="trace-log"></div>
+                </div>
             </div>
         </section>
     </main>
 
+    <script src="bus.js"></script>
     <script src="cpu.js"></script>
+    <script src="fpu.js"></script>
     <script src="assembler.js"></script>
+    <script src="disasm.js"></script>
     <script src="main.js"></script>
 </body>
 </html>
